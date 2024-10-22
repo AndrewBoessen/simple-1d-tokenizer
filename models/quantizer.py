@@ -9,11 +9,22 @@ from einops import rearrange
 
 
 class VectorQuantizer(torch.nn.Module):
+    """
+    Vector Quanitzer Module
+    """
+
     def __init__(self,
                  codebook_size: int = 1024,
                  embedding_dim: int = 256,
                  commitment_cost: float = 0.25
                  ):
+        """
+        Initialize VectorQuantizer
+
+        :param codebook_size: number of embeddings in codebook
+        :param embedding_dim: dimension of discrete embeddings
+        :param commitment_cost: weight of commitment loss
+        """
         super().__init__()
         self.commitment_cost = commitment_cost
 
@@ -22,6 +33,12 @@ class VectorQuantizer(torch.nn.Module):
             -1.0 / codebook_size, 1.0 / codebook_size)
 
     def forward(self, z: torch.Tensor) -> Tuple[torch.Tensor, Mapping[Text, torch.Tensor]]:
+        """
+        Quantize continuous embeddings into categorical distribution
+
+        :param z: continuous embeddings
+        :return: Tuple[torch.Tensor, Mapping[Text, torch.Tensor]]
+        """
         z = z.float()  # cast to float if not already
         # move channels axis to end
         z = rearrange(z, 'b c h w -> b h w c').contiguous()
