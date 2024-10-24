@@ -10,6 +10,10 @@ from einops.layers.torch import Rearrange
 
 
 class ResidualAttention(nn.Module):
+    """
+    Residual Attention Block
+    """
+
     def __init__(
         self,
         d_model,
@@ -18,6 +22,15 @@ class ResidualAttention(nn.Module):
         act_layer=nn.GELU,
         norm_layer=nn.LayerNorm
     ):
+        """
+        Initialize attention blocks params and weight
+
+        :param d_model int: model dimension
+        :param n_head int: number of heads
+        :param mlp_ratio float: ratio of FFN hidden to input dim
+        :param act_layer nn.Module: activation function to use
+        :param norm_layer nn.Module: normalization function to use
+        """
         super().__init__()
 
         self.ln_1 = norm_layer(d_model)  # first layer norm
@@ -37,6 +50,12 @@ class ResidualAttention(nn.Module):
             self,
             x: torch.Tensor
         ):
+            """
+            Calculate attention values
+
+            :param self class: self
+            :param x: input values
+            """
             # multihead attention
             # self attention so q, k, v all come from same input
             # dont return weights to enable flash attention
@@ -46,6 +65,12 @@ class ResidualAttention(nn.Module):
                 self,
                 x: torch.Tensor,
         ):
+            """
+            FOrward pass of residual attention
+
+            :param self class: self
+            :param x: input
+            """
             # norm and apply attention
             attn_output = self.attention(x=self.ln_1(x))
             # residual connection
@@ -56,7 +81,20 @@ class ResidualAttention(nn.Module):
 
 
 class Attention(nn.Module):
+    """
+    Attention without residual connection
+    """
+
     def __init__(self, dim, num_heads=8, qk_scale=None, attn_drop=0., proj_drop=0.):
+        """
+        Initialize attention params and weights
+
+        :param dim int: model dimension
+        :param num_heads int: number of heads
+        :param qk_scale float: constant to scale by
+        :param attn_drop float: dropout ratio
+        :param proj_drop float: output dropout ratio
+        """
         super().__init__()
         self.num_heads = num_heads
         head_dim = dim // num_heads  # divide model dim between heads
@@ -68,6 +106,11 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x):
+        """
+        Apply attention to input
+
+        :param x torch.Tensor: input
+        """
         qkv = self.qkv(x)  # QKV projection
         q, k, v = einops.rearrange(
             # split into individual embeddings
