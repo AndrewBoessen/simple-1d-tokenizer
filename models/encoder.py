@@ -9,7 +9,16 @@ from blocks import ResidualAttention
 
 
 class Encoder(nn.Module):
+    """
+    Image Tokenizer Encoder
+    """
+
     def __init__(self, config):
+        """
+        Initialize Encoder
+
+        :param config Dict: encoder config dictionary
+        """
         super().__init__()
         self.config = config
         self.image_size = config.dataset.preprocessing.crop_size
@@ -82,7 +91,12 @@ class Encoder(nn.Module):
         )
 
     def forward(self, pixel_values, latent_tokens):
-        B, C, H, W = pixel_values.shape[0]  # Batch, Channel, Height, Width
+        """
+        Encode image into sequence of latent tokens
+
+        :param pixel_values torch.Tensor: pixel values of image to encode
+        :param latent_tokens torch.Tensor: Initial sequence of latent tokens
+        """
         x = pixel_values
         x = self.patch_embed(x)
         # flatten paches into sequence
