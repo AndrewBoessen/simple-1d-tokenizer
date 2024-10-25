@@ -1,9 +1,11 @@
+"""
+Image Tokenizer encoder
+"""
+
 import torch
-import torch.nn as nn
-from collections import OrderedDict
+from torch import nn
 import einops
 from einops.layers.torch import Rearrange
-from torch.nn.modules import transformer
 
 from blocks import ResidualAttention
 

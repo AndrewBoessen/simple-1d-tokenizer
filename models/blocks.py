@@ -2,11 +2,10 @@
 Transformer Attention Blocks
 """
 
+from collections import OrderedDict
 import torch
 import torch.nn as nn
-from collections import OrderedDict
 import einops
-from einops.layers.torch import Rearrange
 
 
 class ResidualAttention(nn.Module):
