@@ -46,38 +46,38 @@ class ResidualAttention(nn.Module):
                 ("c_proj", nn.Linear(mlp_width, d_model))
             ]))
 
-        def attention(
-            self,
-            x: torch.Tensor
-        ):
-            """
-            Calculate attention values
+    def attention(
+        self,
+        x: torch.Tensor
+    ):
+        """
+        Calculate attention values
 
-            :param self class: self
-            :param x: input values
-            """
-            # multihead attention
-            # self attention so q, k, v all come from same input
-            # dont return weights to enable flash attention
-            return self.attn(x, x, x, need_weights=False)[0]
+        :param self class: self
+        :param x: input values
+        """
+        # multihead attention
+        # self attention so q, k, v all come from same input
+        # dont return weights to enable flash attention
+        return self.attn(x, x, x, need_weights=False)[0]
 
-        def forward(
-                self,
-                x: torch.Tensor,
-        ):
-            """
-            FOrward pass of residual attention
+    def forward(
+        self,
+        x: torch.Tensor,
+    ):
+        """
+        Forward pass of residual attention
 
-            :param self class: self
-            :param x: input
-            """
-            # norm and apply attention
-            attn_output = self.attention(x=self.ln_1(x))
-            # residual connection
-            x = x + attn_output
-            if self.mlp_ratio > 0:
-                x = x + self.mlp(self.ln_2(x))  # norm and apply residual FFN
-            return x
+        :param self class: self
+        :param x: input
+        """
+        # norm and apply attention
+        attn_output = self.attention(x=self.ln_1(x))
+        # residual connection
+        x = x + attn_output
+        if self.mlp_ratio > 0:
+            x = x + self.mlp(self.ln_2(x))  # norm and apply residual FFN
+        return x
 
 
 class Attention(nn.Module):
