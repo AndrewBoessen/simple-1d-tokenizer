@@ -53,7 +53,7 @@ class VectorQuantizer(torch.nn.Module):
             2 * torch.einsum('bd,dn->bn', z_flattened, embedding.T)
 
         closest_embedding_ids = torch.argmin(d, dim=1)
-        z_q = self.embedding_table(closest_embedding_ids).view(z.shape)
+        z_q = self.get_codebook_entry(closest_embedding_ids).view(z.shape)
 
         # Calculate loss
         commitment_loss = self.commitment_cost * \
@@ -75,3 +75,6 @@ class VectorQuantizer(torch.nn.Module):
         )
 
         return z_q, result_dict
+
+    def get_codebook_entry(self, ids):
+        return self.embedding_table(ids)
