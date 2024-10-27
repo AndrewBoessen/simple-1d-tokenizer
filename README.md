@@ -46,7 +46,10 @@ The Vision Transformer processes images through several key stages:
 3. **Transformer Encoding:**
    - $L$ layers of multi-head self-attention and MLP blocks
    - Layer $l$ computation:
-     $$\begin{aligned}z'_l=\text{MSA}(\text{LN}(z_{l-1}))+z_{l-1}z_l=\text{MLP}(\text{LN}(z'_l))+z'_l\end{aligned}$$
+     $$\begin{aligned}
+z'_l &= \text{MSA}(\text{LN}(z_{l-1})) + z_{l-1} \\
+z_l &= \text{MLP}(\text{LN}(z'_l)) + z'_l
+\end{aligned}$$
    - Output: contextual representations $z_L \in \mathbb{R}^{N \times D}$
 
 ### Vector Quantization (VQ)
