@@ -77,4 +77,9 @@ class VectorQuantizer(torch.nn.Module):
         return z_q, result_dict
 
     def get_codebook_entry(self, ids):
+        """
+        Get codebook entries for specified ids
+
+        :param ids torch.Tensor: ids to retrieve
+        """
         return self.embedding_table(ids)

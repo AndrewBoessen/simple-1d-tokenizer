@@ -6,9 +6,9 @@ import torch
 from torch import nn
 from einops import rearrange
 
-from encoder import Encoder
-from decoder import Decoder
-from quantizer import VectorQuantizer
+from .encoder import Encoder
+from .decoder import Decoder
+from .quantizer import VectorQuantizer
 
 
 class Tokenizer(nn.Module):

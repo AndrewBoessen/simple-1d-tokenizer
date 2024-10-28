@@ -7,7 +7,7 @@ from torch import nn
 import einops
 from einops.layers.torch import Rearrange
 
-from blocks import ResidualAttention
+from .blocks import ResidualAttention
 
 
 class Decoder(nn.Module):
