@@ -30,6 +30,8 @@ The image tokenizer processes input images $x \in \mathbb{R}^{H \times W \times 
 
 ### Vision Transformer (ViT)
 
+![ViT](./assets/vision_transformer.png)
+
 The Vision Transformer processes images through several key stages:
 
 1. **Patch Embedding:**
