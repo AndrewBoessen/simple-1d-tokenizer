@@ -52,6 +52,8 @@ The Vision Transformer processes images through several key stages:
 
 ### Vector Quantization (VQ)
 
+![VQ](./assets/vector_quant.png)
+
 The VQ layer maps continuous latent vectors to discrete tokens:
 
 1. **Codebook:**
