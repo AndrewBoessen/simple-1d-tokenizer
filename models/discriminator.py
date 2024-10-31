@@ -132,3 +132,92 @@ class BlurBlock(nn.Module):
             stride=2,
             groups=channels
         )
+
+
+class NLayerDiscriminator(nn.Module):
+    """
+    GAN Discriminator
+    """
+
+    def __init__(
+        self,
+        num_channels: int = 3,
+        hidden_channels: int = 128,
+        num_stages: int = 3,
+        blur_resample: bool = True,
+        blur_kernel_size: int = 4
+    ):
+        """
+        Initialize discriminator modules
+
+        :param num_channels: channels in pixel space
+        :param hidden_channels: hidden dim of conv net
+        :param num_stages: number of blocks in conv net
+        :param blur_resample: use blur for pool
+        :param blur_kernel_size: in kernel size
+        """
+        super().__init__()
+        assert num_stages > 0, "connot have 0 stages in discriminator"
+
+        # channel multipliers
+        in_channel_mult = (1,) + tuple(map(lambda t: 2**t,
+                                           range(num_stages)))  # (1, 1, 2, 4)
+        activation = functools.partial(nn.LeakyReLU, negative_slope=0.1)
+
+        # convert pixel space to hidden dim
+        self.block_in = nn.Sequential(
+            Conv2dSame(
+                num_channels,
+                hidden_channels,
+                kernel_size=5
+            ),
+            activation(),
+        )
+
+        # blur kernels used in pooling
+        BLUR_KERNEL_MAP = {
+            3: (1, 2, 1),
+            4: (1, 3, 3, 1),
+            5: (1, 4, 6, 4, 1),
+        }
+
+        discriminator_blocks = []
+        for i in range(num_stages):
+            in_channels = hidden_channels * in_channel_mult[i]  # d * 2^i
+            out_channels = hidden_channels * \
+                in_channel_mult[i + 1]  # d * 2^(i+1)
+            block = nn.Sequential(
+                Conv2dSame(
+                    in_channels,
+                    out_channels,
+                    kernel_size=3
+                ),
+                nn.AvgPool2d(kernel_size=2, stride=2) if not blur_resample else BlurBlock(
+                    BLUR_KERNEL_MAP[blur_kernel_size]),
+                nn.GroupNorm(32, out_channels),
+                activation(),  # leakyRelu
+            )
+            discriminator_blocks.append(block)
+
+        self.blocks = nn.ModuleList(discriminator_blocks)
+        self.pool = nn.AdaptiveAvgPool2d((16, 16))
+
+        self.to_logits = nn.Sequential(
+            Conv2dSame(out_channels, out_channels, 1),
+            activation(),
+            Conv2dSame(out_channels, 1, kernel_size=5)
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Apply discriminator to image
+
+        :param x: input image
+        :return: discriminator predictions
+        """
+        hidden_states = self.block_in(x)  # pixel -> hidden dim : 5 x 5 kernel
+        for block in self.blocks:
+            hidden_states = block(hidden_states)
+        hidden_states = self.pool(hidden_states)  # blur kernels
+
+        return self.to_logits(hidden_states)  # hidden dim -> 1 (T/F bool)
