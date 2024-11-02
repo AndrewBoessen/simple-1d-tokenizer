@@ -1,14 +1,5 @@
-import json
 import os
-import time
-import math
-from pathlib import Path
-import pprint
-import glob
-from collections import defaultdict
 
-from data import SimpleImageDataset
-import torch
 from omegaconf import OmegaConf
 from torch.optim import AdamW
 from torchinfo import summary
@@ -105,6 +96,14 @@ def create_optimizer(
     model,
     loss_module
 ):
+    """
+    Create optimizers for training
+
+    :param config str: config file path
+    :param logger logger: train logger
+    :param model class: model module
+    :param loss_module class: loss module
+    """
     logger.info("creating oprimizers")
     optim_config = config.optimizer.params  # config variables for optimizer
     lr = optim_config.learning_rate
