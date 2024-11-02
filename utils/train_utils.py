@@ -97,3 +97,55 @@ def create_model_and_loss_module(
         logger.info(model_summary_str)
 
     return model, ema_model, loss
+
+
+def create_optimizer(
+    config,
+    logger,
+    model,
+    loss_module
+):
+    logger.info("creating oprimizers")
+    optim_config = config.optimizer.params  # config variables for optimizer
+    lr = optim_config.learning_rate
+
+    optim_cls = AdamW  # use Adam optimizer
+
+    # Exclude terms we may not want to apply weight decay.
+    exclude = (lambda n, p: p.ndim < 2 or "ln" in n or "bias" in n or 'latent_tokens' in n
+               or 'mask_token' in n or 'embedding' in n or 'norm' in n or 'gamma' in n)
+
+    def include(n, p): return not exclude(n, p)
+    named_parameters = list(model.named_parameters())
+    gain_or_bias_params = [
+        p for n, p in named_parameters if exclude(n, p) and p.requires_grad]
+    rest_params = [p for n, p in named_parameters if include(
+        n, p) and p.requires_grad]
+    optimizer = optim_cls(
+        [
+            {"params": gain_or_bias_params, "weight_decay": 0.},
+            {"params": rest_params, "weight_decay": optim_config.weight_decay},
+        ],
+        lr=lr,
+        betas=(optim_config.beta1, optim_config.beta2)
+    )
+
+    # create discriminator optimizer
+    discriminator_lr = optim_config.discriminator_learning_rate
+    discriminator_params = list(loss_module.named_parameters())
+    discriminator_gain_or_bias_params = [
+        p for n, p in discriminator_params if exclude(n, p) and p.requires_grad]
+    discriminator_rest_params = [
+        p for n, p in discriminator_params if include(n, p) and p.requires_grad]
+
+    discriminator_optimizer = optim_cls(
+        [
+            {"params": discriminator_gain_or_bias_params, "weight_decay": 0.},
+            {"params": discriminator_rest_params,
+             "weight_decay": optim_config.weight_decay},
+        ],
+        lr=discriminator_lr,
+        betas=(optim_config.beta1, optim_config.beta2)
+    )
+
+    return optimizer, discriminator_optimizer
