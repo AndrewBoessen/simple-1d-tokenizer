@@ -12,8 +12,9 @@ from torch.optim import AdamW
 from torchinfo import summary
 
 from models import ReconstructionLoss, Tokenizer, EMAModel
-from .lr_scheduler import get_cosine_schedule_with_warmup
-from .viz_utils import make_viz_from_samples, make_viz_from_samples_generation
+from utils.lr_scheduler import get_cosine_schedule_with_warmup
+from utils.viz_utils import make_viz_from_samples
+from evaluator.evaluator import VQGANEvaluator
 
 
 def get_config():
@@ -195,6 +196,20 @@ def create_lr_scheduler(config, logger, accelerator, optimizer, discriminator_op
         discriminator_lr_scheduler = None
 
     return lr_scheduler, discriminator_lr_scheduler
+
+
+def create_evaluator(config, logger, accelerator):
+    """Creates evaluator."""
+    logger.info("Creating evaluator.")
+    evaluator = VQGANEvaluator(
+        device=accelerator.device,
+        enable_rfid=True,
+        enable_inception_score=True,
+        enable_codebook_usage_measure=True,
+        enable_codebook_entropy_measure=True,
+        num_codebook_entries=config.model.vq_model.codebook_size
+    )
+    return evaluator
 
 
 def train_one_epoch(
