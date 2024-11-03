@@ -5,6 +5,7 @@ from torch.optim import AdamW
 from torchinfo import summary
 
 from models import ReconstructionLoss, Tokenizer, EMAModel
+from .lr_scheduler import get_cosine_schedule_with_warmup
 
 
 def get_config():
@@ -148,3 +149,41 @@ def create_optimizer(
     )
 
     return optimizer, discriminator_optimizer
+
+
+def create_lr_scheduler(config, logger, accelerator, optimizer, discriminator_optimizer=None):
+    """
+    Create lr scheduler for training
+
+    :param config Dict: config object containing params
+    :param logger Logger: instance of Logger
+    :param accelerator Accelerator: instance of Accelerator
+    :param optimizer nn.Module: model optimizer
+    :param discriminator_optimizer nn.Module: discriminator optimizer
+    """
+    logger.info("Creating lr_schedulers.")
+
+    # Create main model scheduler
+    lr_scheduler = get_cosine_schedule_with_warmup(
+        optimizer=optimizer,
+        num_training_steps=config.training.max_train_steps * accelerator.num_processes,
+        num_warmup_steps=config.lr_scheduler.params.warmup_steps * accelerator.num_processes,
+        base_lr=config.lr_scheduler.params.learning_rate,
+        end_lr=config.lr_scheduler.params.end_lr,
+    )
+
+    # Create discriminator scheduler if needed
+    if discriminator_optimizer is not None:
+        discriminator_steps = (config.training.max_train_steps * accelerator.num_processes -
+                               config.losses.discriminator_start)
+        discriminator_lr_scheduler = get_cosine_schedule_with_warmup(
+            optimizer=discriminator_optimizer,
+            num_training_steps=discriminator_steps,
+            num_warmup_steps=config.lr_scheduler.params.warmup_steps * accelerator.num_processes,
+            base_lr=config.lr_scheduler.params.learning_rate,
+            end_lr=config.lr_scheduler.params.end_lr,
+        )
+    else:
+        discriminator_lr_scheduler = None
+
+    return lr_scheduler, discriminator_lr_scheduler
