@@ -7,14 +7,20 @@ import pprint
 from collections import defaultdict
 
 import torch
+from torch.utils.data import Dataset, DataLoader, Subset
 from omegaconf import OmegaConf
 from torch.optim import AdamW
 from torchinfo import summary
+from torchvision import transforms
 
 from models import ReconstructionLoss, Tokenizer, EMAModel
 from utils.lr_scheduler import get_cosine_schedule_with_warmup
 from utils.viz_utils import make_viz_from_samples
 from evaluator.evaluator import VQGANEvaluator
+from data.gameplay_dataset_reader import (
+    PreprocessingConfig,
+    GameFrameDataset
+)
 
 
 def get_config():
@@ -210,6 +216,126 @@ def create_evaluator(config, logger, accelerator):
         num_codebook_entries=config.model.vq_model.codebook_size
     )
     return evaluator
+
+
+def create_transforms(preproc_config: PreprocessingConfig, is_training: bool):
+    """
+    Create transform pipeline based on preprocessing config.
+
+    Args:
+        preproc_config: Preprocessing configuration
+        is_training: Whether these transforms are for training
+    """
+    transform_list = []
+
+    # Resize
+    if preproc_config.resize_shorter_edge > 0:
+        transform_list.append(
+            transforms.Resize(
+                preproc_config.resize_shorter_edge, antialias=True)
+        )
+
+    # Crop
+    if is_training and preproc_config.random_crop:
+        transform_list.append(transforms.RandomCrop(preproc_config.crop_size))
+    else:
+        transform_list.append(transforms.CenterCrop(preproc_config.crop_size))
+
+    # Random flip for training
+    if is_training and preproc_config.random_flip:
+        transform_list.append(transforms.RandomHorizontalFlip())
+
+    # Convert to tensor and normalize
+    transform_list.extend([
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                             std=[0.229, 0.224, 0.225])
+    ])
+
+    return transforms.Compose(transform_list)
+
+
+def create_dataloader(config, logger, accelerator):
+    """
+    Creates data loader for training and testing.
+
+    Args:
+        config: Configuration object containing training and dataset parameters
+        logger: Logger instance for logging information
+        accelerator: Accelerator instance for distributed training
+
+    Returns:
+        Tuple of (train_dataloader, eval_dataloader)
+    """
+    logger.info("Creating dataloaders.")
+
+    # Calculate batch sizes
+    total_batch_size_without_accum = (
+        config.training.per_gpu_batch_size * accelerator.num_processes
+    )
+    total_batch_size = (
+        config.training.per_gpu_batch_size *
+        accelerator.num_processes *
+        config.training.gradient_accumulation_steps
+    )
+
+    # Create transforms
+    train_transform = create_transforms(
+        config.dataset.preprocessing, is_training=True)
+    eval_transform = create_transforms(
+        config.dataset.preprocessing, is_training=False)
+
+    # Create datasets
+    train_dataset = GameFrameDataset(
+        shard_dir=config.dataset.params.train_shards_path_or_url,
+        transform=train_transform,
+        preload_shards=False  # Let's not preload by default for large datasets
+    )
+
+    eval_dataset = GameFrameDataset(
+        shard_dir=config.dataset.params.eval_shards_path_or_url,
+        transform=eval_transform,
+        preload_shards=False
+    )
+
+    # Limit training examples if specified
+    if hasattr(config.experiment, 'max_train_examples') and \
+       config.experiment.max_train_examples > 0:
+        train_dataset = Subset(
+            train_dataset,
+            range(min(len(train_dataset), config.experiment.max_train_examples))
+        )
+
+    # Create dataloaders
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=config.training.per_gpu_batch_size,
+        shuffle=True,
+        num_workers=config.dataset.params.num_workers_per_gpu,
+        pin_memory=True,
+        drop_last=True  # Drop last incomplete batch for training
+    )
+
+    eval_dataloader = DataLoader(
+        eval_dataset,
+        batch_size=config.training.per_gpu_batch_size,
+        shuffle=False,
+        num_workers=config.dataset.params.num_workers_per_gpu,
+        pin_memory=True
+    )
+
+    # Prepare dataloaders with accelerator
+    train_dataloader, eval_dataloader = accelerator.prepare(
+        train_dataloader, eval_dataloader
+    )
+
+    logger.info(f"Created train dataloader with {len(train_dataset)} samples")
+    logger.info(f"Created eval dataloader with {len(eval_dataset)} samples")
+    logger.info(f"Per GPU batch size: {config.training.per_gpu_batch_size}")
+    logger.info(f"Total batch size (with parallel & accumulation): {
+                total_batch_size}")
+
+    return train_dataloader, eval_dataloader
 
 
 def train_one_epoch(
