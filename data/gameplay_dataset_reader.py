@@ -1,11 +1,12 @@
-import torch
-from torch.utils.data import Dataset, DataLoader, Subset
-import numpy as np
 import os
-from typing import List, Tuple, Dict
-from PIL import Image
 import random
 from dataclasses import dataclass
+from typing import Dict, List, Tuple
+
+import numpy as np
+import torch
+from PIL import Image
+from torch.utils.data import DataLoader, Dataset, Subset
 
 
 @dataclass
@@ -22,12 +23,7 @@ class GameFrameDataset(Dataset):
     Handles sharded numpy files containing frame data and action labels.
     """
 
-    def __init__(
-        self,
-        shard_dir: str,
-        transform=None,
-        preload_shards: bool = False
-    ):
+    def __init__(self, shard_dir: str, transform=None, preload_shards: bool = False):
         """
         Initialize the dataset.
 
@@ -41,14 +37,25 @@ class GameFrameDataset(Dataset):
         self.preload_shards = preload_shards
 
         # Get all shard files
-        self.frame_shards = sorted([f for f in os.listdir(shard_dir)
-                                    if f.startswith('frames_') and f.endswith('.npy')])
-        self.action_shards = sorted([f for f in os.listdir(shard_dir)
-                                     if f.startswith('actions_') and f.endswith('.npy')])
+        self.frame_shards = sorted(
+            [
+                f
+                for f in os.listdir(shard_dir)
+                if f.startswith("frames_") and f.endswith(".npy")
+            ]
+        )
+        self.action_shards = sorted(
+            [
+                f
+                for f in os.listdir(shard_dir)
+                if f.startswith("actions_") and f.endswith(".npy")
+            ]
+        )
 
         # Verify matching shards
-        assert len(self.frame_shards) == len(self.action_shards), \
-            "Number of frame and action shards must match"
+        assert len(self.frame_shards) == len(
+            self.action_shards
+        ), "Number of frame and action shards must match"
 
         # Load shard metadata to get total dataset size
         self.shard_sizes = []
@@ -57,10 +64,9 @@ class GameFrameDataset(Dataset):
         for frame_shard in self.frame_shards:
             shard_path = os.path.join(shard_dir, frame_shard)
             # Load just the shape information without loading the full array
-            shard_size = np.load(shard_path, mmap_mode='r').shape[0]
+            shard_size = np.load(shard_path, mmap_mode="r").shape[0]
             self.shard_sizes.append(shard_size)
-            self.cumulative_sizes.append(
-                self.cumulative_sizes[-1] + shard_size)
+            self.cumulative_sizes.append(self.cumulative_sizes[-1] + shard_size)
 
         # Initialize shard cache if preloading
         self.shard_cache = {}
@@ -74,8 +80,8 @@ class GameFrameDataset(Dataset):
             action_path = os.path.join(self.shard_dir, self.action_shards[idx])
 
             self.shard_cache[idx] = {
-                'frames': np.load(frame_path),
-                'actions': np.load(action_path)
+                "frames": np.load(frame_path),
+                "actions": np.load(action_path),
             }
 
     def _load_shard(self, shard_idx: int) -> Tuple[np.ndarray, np.ndarray]:
@@ -89,12 +95,13 @@ class GameFrameDataset(Dataset):
             Tuple containing the frames and actions arrays
         """
         if self.preload_shards:
-            return (self.shard_cache[shard_idx]['frames'],
-                    self.shard_cache[shard_idx]['actions'])
+            return (
+                self.shard_cache[shard_idx]["frames"],
+                self.shard_cache[shard_idx]["actions"],
+            )
 
         frame_path = os.path.join(self.shard_dir, self.frame_shards[shard_idx])
-        action_path = os.path.join(
-            self.shard_dir, self.action_shards[shard_idx])
+        action_path = os.path.join(self.shard_dir, self.action_shards[shard_idx])
 
         frames = np.load(frame_path)
         actions = np.load(action_path)
@@ -110,8 +117,12 @@ class GameFrameDataset(Dataset):
         Returns:
             Tuple of (shard_idx, local_idx)
         """
-        shard_idx = next(i for i, cum_size in enumerate(self.cumulative_sizes)
-                         if cum_size > idx) - 1
+        shard_idx = (
+            next(
+                i for i, cum_size in enumerate(self.cumulative_sizes) if cum_size > idx
+            )
+            - 1
+        )
         local_idx = idx - self.cumulative_sizes[shard_idx]
         return shard_idx, local_idx
 
@@ -119,7 +130,7 @@ class GameFrameDataset(Dataset):
         """Return total size of the dataset."""
         return self.cumulative_sizes[-1]
 
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
         """
         Get a single item from the dataset.
 
@@ -127,7 +138,7 @@ class GameFrameDataset(Dataset):
             idx (int): Index of the item to get
 
         Returns:
-            Tuple of (frame, action) tensors
+            Dictionary of (frame, action) tensors
         """
         if idx >= len(self):
             raise IndexError("Index out of bounds")
@@ -153,4 +164,4 @@ class GameFrameDataset(Dataset):
 
         action = torch.tensor(action)
 
-        return frame, action
+        return {"image": frame, "action": action}
