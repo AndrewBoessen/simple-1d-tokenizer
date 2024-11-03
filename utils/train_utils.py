@@ -213,6 +213,25 @@ def train_one_epoch(
     evaluator,
     global_step,
 ):
+    """
+    Train autoencoder for one epoch
+
+    :param config Dict: config object
+    :param logger Logger: logger instance
+    :param accelerator Accelerator: accelerator instance
+    :param model nn.Module: autoencoder model
+    :param ema_model nn.Module: EMA model
+    :param loss_module nn.Module: loss module for autoencoder
+    :param optimizer nn.Module: model optimizer
+    :param discriminator_optimizer nn.Module: discriminator module
+    :param lr_scheduler nn.Module: lr scheduler
+    :param discriminator_lr_scheduler nn.Module: discriminator scheduler
+    :param train_dataloader Dataloader: train data Dataloader
+    :param eval_dataloader Dataloder: evaluation dataloader
+    :param evaluator nn.Module: autoencoder evaluator
+    :param global_step int: current training step
+    :raises ValueError: ValueError
+    """
     # Initialize timing meters
     batch_time_meter = AverageMeter()
     data_time_meter = AverageMeter()
@@ -518,50 +537,6 @@ def reconstruct_images(
         filename = f"{global_step:08}_s-{i:03}-{fnames[i]}.png"
         path = os.path.join(root, filename)
         img.save(path)
-
-    model.train()
-
-
-@torch.no_grad()
-def generate_images(model, tokenizer, accelerator,
-                    global_step, output_dir, logger, config=None):
-    model.eval()
-    tokenizer.eval()
-    logger.info("Generating images...")
-    generated_image = sample_fn(
-        accelerator.unwrap_model(model),
-        tokenizer,
-        guidance_scale=config.model.generator.get("guidance_scale", 3.0),
-        guidance_decay=config.model.generator.get(
-            "guidance_decay", "constant"),
-        guidance_scale_pow=config.model.generator.get(
-            "guidance_scale_pow", 3.0),
-        randomize_temperature=config.model.generator.get(
-            "randomize_temperature", 2.0),
-        softmax_temperature_annealing=config.model.generator.get(
-            "softmax_temperature_annealing", False),
-        num_sample_steps=config.model.generator.get("num_steps", 8),
-        device=accelerator.device,
-        return_tensor=True
-    )
-    images_for_saving, images_for_logging = make_viz_from_samples_generation(
-        generated_image)
-
-    # Log images.
-    if config.training.enable_wandb:
-        accelerator.get_tracker("wandb").log_images(
-            {"Train Generated": [images_for_saving]}, step=global_step
-        )
-    else:
-        accelerator.get_tracker("tensorboard").log_images(
-            {"Train Generated": images_for_logging}, step=global_step
-        )
-    # Log locally.
-    root = Path(output_dir) / "train_generated_images"
-    os.makedirs(root, exist_ok=True)
-    filename = f"{global_step:08}_s-generated.png"
-    path = os.path.join(root, filename)
-    images_for_saving.save(path)
 
     model.train()
     return
