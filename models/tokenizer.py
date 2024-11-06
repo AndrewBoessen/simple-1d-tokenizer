@@ -3,15 +3,16 @@
 """
 
 import torch
-from torch import nn
 from einops import rearrange
+from torch import nn
 
-from .encoder import Encoder
+from .base_model import BaseModel
 from .decoder import Decoder
+from .encoder import Encoder
 from .quantizer import VectorQuantizer
 
 
-class Tokenizer(nn.Module):
+class Tokenizer(BaseModel):
     """
     1D Image Tokenizer
     """
@@ -29,9 +30,10 @@ class Tokenizer(nn.Module):
         self.decoder = Decoder(config)
 
         self.num_latent_tokens = config.model.vq_model.num_latent_tokens
-        scale = self.encoder.width ** -0.5
+        scale = self.encoder.width**-0.5
         self.latent_tokens = nn.Parameter(
-            scale * torch.randn(self.num_latent_tokens, self.encoder.width))
+            scale * torch.randn(self.num_latent_tokens, self.encoder.width)
+        )
 
         self.apply(self._init_weights)
 
@@ -42,18 +44,24 @@ class Tokenizer(nn.Module):
         )
 
     def _init_weights(self, module):
-        """ Initialize the weights.
-            :param:
-                module -> torch.nn.Module: module to initialize
+        """Initialize the weights.
+        :param:
+            module -> torch.nn.Module: module to initialize
         """
-        if isinstance(module, nn.Linear) or isinstance(module, nn.Conv1d) or isinstance(module, nn.Conv2d):
+        if (
+            isinstance(module, nn.Linear)
+            or isinstance(module, nn.Conv1d)
+            or isinstance(module, nn.Conv2d)
+        ):
             module.weight.data = nn.init.trunc_normal_(
-                module.weight.data, mean=0.0, std=0.02)
+                module.weight.data, mean=0.0, std=0.02
+            )
             if module.bias is not None:
                 module.bias.data.zero_()
         elif isinstance(module, nn.Embedding):
             module.weight.data = nn.init.trunc_normal_(
-                module.weight.data, mean=0.0, std=0.02)
+                module.weight.data, mean=0.0, std=0.02
+            )
         elif isinstance(module, nn.LayerNorm):
             module.bias.data.zero_()
             module.weight.data.fill_(1.0)
@@ -85,10 +93,8 @@ class Tokenizer(nn.Module):
         """
         tokens = tokens.squeeze(1)
         B, L = tokens.shape
-        z_q = self.quantizer.get_codebook_entry(
-            tokens.reshape(-1)
-        ).reshape(B, L, -1)
-        z_q = rearrange(z_q, 'B L C -> B C L')
+        z_q = self.quantizer.get_codebook_entry(tokens.reshape(-1)).reshape(B, L, -1)
+        z_q = rearrange(z_q, "B L C -> B C L")
         return self.decoder(z_q)
 
     def forward(self, x):

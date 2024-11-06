@@ -1,11 +1,12 @@
 # models/__init__.py
-from .tokenizer import Tokenizer
-from .encoder import Encoder
+from .base_model import BaseModel
+from .blocks import Attention, ResidualAttention
 from .decoder import Decoder
-from .quantizer import VectorQuantizer
-from .blocks import ResidualAttention, Attention
 from .ema import EMAModel
-from .loss import ReconstructionLoss, PerceptualLoss
+from .encoder import Encoder
+from .loss import PerceptualLoss, ReconstructionLoss
+from .quantizer import VectorQuantizer
+from .tokenizer import Tokenizer
 
 __version__ = "0.1.0"
 
@@ -18,5 +19,6 @@ __all__ = [
     "Attention",
     "EMAModel",
     "ReconstructionLoss",
-    "PerceptualLoss"
+    "PerceptualLoss",
+    "BaseModel",
 ]
