@@ -1,13 +1,14 @@
 """
 Loss Modules
 """
+
 from typing import Mapping, Text, Tuple
 
 import torch
-from torch import nn
 import torch.nn.functional as F
+from einops import rearrange
+from torch import nn
 from torchvision import models
-from einpos import rearrange
 
 from .discriminator import NLayerDiscriminator
 
@@ -31,7 +32,7 @@ def compute_lecam_loss(
     logits_real_mean: torch.Tensor,
     logits_fake_mean: torch.Tensor,
     ema_logits_real_mean: torch.Tensor,
-    ema_logits_fake_mean: torch.Tensor
+    ema_logits_fake_mean: torch.Tensor,
 ) -> torch.Tensor:
     """Computes the LeCam loss for the given average real and fake logits.
 
@@ -45,9 +46,11 @@ def compute_lecam_loss(
         lecam_loss -> torch.Tensor: The LeCam loss.
     """
     lecam_loss = torch.mean(
-        torch.pow(F.relu(logits_real_mean - ema_logits_fake_mean), 2))
+        torch.pow(F.relu(logits_real_mean - ema_logits_fake_mean), 2)
+    )
     lecam_loss += torch.mean(
-        torch.pow(F.relu(ema_logits_real_mean - logits_fake_mean), 2))
+        torch.pow(F.relu(ema_logits_real_mean - logits_fake_mean), 2)
+    )
     return lecam_loss
 
 
@@ -62,11 +65,14 @@ class PerceptualLoss(nn.Module):
         """
         super().__init__()
         self.convnext = models.convnext_small(
-            weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1).eval()
-        self.register_buffer("imagenet_mean", torch.Tensor(
-            _IMAGENET_MEAN)[None, :, None, None])
-        self.register_buffer("imagenet_std", torch.Tensor(
-            _IMAGENET_STD)[None, :, None, None])
+            weights=models.ConvNeXt_Small_Weights.IMAGENET1K_V1
+        ).eval()
+        self.register_buffer(
+            "imagenet_mean", torch.Tensor(_IMAGENET_MEAN)[None, :, None, None]
+        )
+        self.register_buffer(
+            "imagenet_std", torch.Tensor(_IMAGENET_STD)[None, :, None, None]
+        )
 
         for param in self.parameters():
             param.requires_grad = False
@@ -82,17 +88,14 @@ class PerceptualLoss(nn.Module):
         self.eval()
 
         input = torch.nn.functional.interpolate(
-            input, size=224, mode="bilinear", align_corners=False, antialias=True)
+            input, size=224, mode="bilinear", align_corners=False, antialias=True
+        )
         target = torch.nn.functional.interpolate(
-            target, size=224, mode="bilinear", align_corners=False, antialias=True)
-        pred_input = self.convnext(
-            (input - self.imagenet_mean) / self.imagenet_std)
-        pred_target = self.convnext(
-            (target - self.imagenet_mean) / self.imagenet_std)
-        loss = torch.nn.functional.mse_loss(
-            pred_input,
-            pred_target,
-            reduction="mean")
+            target, size=224, mode="bilinear", align_corners=False, antialias=True
+        )
+        pred_input = self.convnext((input - self.imagenet_mean) / self.imagenet_std)
+        pred_target = self.convnext((target - self.imagenet_mean) / self.imagenet_std)
+        loss = torch.nn.functional.mse_loss(pred_input, pred_target, reduction="mean")
 
         return loss
 
@@ -135,7 +138,7 @@ class ReconstructionLoss(nn.Module):
         reconstructions: torch.Tensor,
         extra_result_dict: Mapping[Text, torch.Tensor],
         global_step: int,
-        mode: str = "generator"
+        mode: str = "generator",
     ) -> Tuple[torch.Tensor, Mapping[Text, torch.Tensor]]:
         """
         Compute loss for autoencoder
@@ -151,7 +154,9 @@ class ReconstructionLoss(nn.Module):
         inputs = inputs.float()
         reconstructions = reconstructions.float()
         if mode == "generator":
-            return self._forward_generator(inputs, reconstructions, extra_result_dict, global_step)
+            return self._forward_generator(
+                inputs, reconstructions, extra_result_dict, global_step
+            )
         elif mode == "discriminator":
             return self._forward_discriminator(inputs, reconstructions, global_step)
         else:
@@ -170,7 +175,7 @@ class ReconstructionLoss(nn.Module):
         inputs: torch.Tensor,
         reconstructions: torch.Tensor,
         extra_result_dict: Mapping[Text, torch.Tensor],
-        global_step: int
+        global_step: int,
     ) -> Tuple[torch.Tensor, Mapping[Text, torch.Tensor]]:
         """
         Compute loss for generator
@@ -185,14 +190,13 @@ class ReconstructionLoss(nn.Module):
         inputs = inputs.contiguous()
         reconstructions = reconstructions.contiguous()
         if self.reconstruction_loss == "l1":
-            reconstruction_loss = F.l1_loss(
-                inputs, reconstructions, reduction="mean")
+            reconstruction_loss = F.l1_loss(inputs, reconstructions, reduction="mean")
         elif self.reconstruction_loss == "l2":
-            reconstruction_loss = F.mse_loss(
-                inputs, reconstructions, reduction="mean")
+            reconstruction_loss = F.mse_loss(inputs, reconstructions, reduction="mean")
         else:
-            raise ValueError(f"Unsuppored reconstruction_loss {
-                             self.reconstruction_loss}")
+            raise ValueError(
+                f"Unsuppored reconstruction_loss {self.reconstruction_loss}"
+            )
         reconstruction_loss *= self.reconstruction_weight
 
         # Compute perceptual loss.
@@ -200,8 +204,11 @@ class ReconstructionLoss(nn.Module):
 
         # Compute discriminator loss.
         generator_loss = torch.zeros((), device=inputs.device)
-        discriminator_factor = self.discriminator_factor if self.should_discriminator_be_trained(
-            global_step) else 0
+        discriminator_factor = (
+            self.discriminator_factor
+            if self.should_discriminator_be_trained(global_step)
+            else 0
+        )
         d_weight = 1.0
         if discriminator_factor > 0.0 and self.discriminator_weight > 0.0:
             # Disable discriminator gradients.
@@ -223,11 +230,11 @@ class ReconstructionLoss(nn.Module):
         loss_dict = dict(
             total_loss=total_loss.clone().detach(),
             reconstruction_loss=reconstruction_loss.detach(),
-            perceptual_loss=(self.perceptual_weight *
-                             perceptual_loss).detach(),
+            perceptual_loss=(self.perceptual_weight * perceptual_loss).detach(),
             quantizer_loss=(self.quantizer_weight * quantizer_loss).detach(),
             weighted_gan_loss=(
-                d_weight * discriminator_factor * generator_loss).detach(),
+                d_weight * discriminator_factor * generator_loss
+            ).detach(),
             discriminator_factor=torch.tensor(discriminator_factor),
             commitment_loss=extra_result_dict["commitment_loss"].detach(),
             codebook_loss=extra_result_dict["codebook_loss"].detach(),
@@ -251,8 +258,11 @@ class ReconstructionLoss(nn.Module):
         :param global_step: index of current train step
         :return: loss values
         """
-        discriminator_factor = self.discriminator_factor if self.should_discriminator_be_trained(
-            global_step) else 0
+        discriminator_factor = (
+            self.discriminator_factor
+            if self.should_discriminator_be_trained(global_step)
+            else 0
+        )
         loss_dict = {}
         # Turn the gradients on.
         for param in self.discriminator.parameters():
@@ -262,23 +272,31 @@ class ReconstructionLoss(nn.Module):
         logits_real = self.discriminator(real_images)
         logits_fake = self.discriminator(reconstructions.detach())
 
-        discriminator_loss = discriminator_factor * \
-            hinge_d_loss(logits_real=logits_real, logits_fake=logits_fake)
+        discriminator_loss = discriminator_factor * hinge_d_loss(
+            logits_real=logits_real, logits_fake=logits_fake
+        )
 
         # optional lecam regularization
         lecam_loss = torch.zeros((), device=inputs.device)
         if self.lecam_regularization_weight > 0.0:
-            lecam_loss = compute_lecam_loss(
-                torch.mean(logits_real),
-                torch.mean(logits_fake),
-                self.ema_real_logits_mean,
-                self.ema_fake_logits_mean
-            ) * self.lecam_regularization_weight
+            lecam_loss = (
+                compute_lecam_loss(
+                    torch.mean(logits_real),
+                    torch.mean(logits_fake),
+                    self.ema_real_logits_mean,
+                    self.ema_fake_logits_mean,
+                )
+                * self.lecam_regularization_weight
+            )
 
-            self.ema_real_logits_mean = self.ema_real_logits_mean * self.lecam_ema_decay + \
-                torch.mean(logits_real).detach() * (1 - self.lecam_ema_decay)
-            self.ema_fake_logits_mean = self.ema_fake_logits_mean * self.lecam_ema_decay + \
-                torch.mean(logits_fake).detach() * (1 - self.lecam_ema_decay)
+            self.ema_real_logits_mean = (
+                self.ema_real_logits_mean * self.lecam_ema_decay
+                + torch.mean(logits_real).detach() * (1 - self.lecam_ema_decay)
+            )
+            self.ema_fake_logits_mean = (
+                self.ema_fake_logits_mean * self.lecam_ema_decay
+                + torch.mean(logits_fake).detach() * (1 - self.lecam_ema_decay)
+            )
 
         discriminator_loss += lecam_loss
 

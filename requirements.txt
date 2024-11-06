@@ -1,7 +1,15 @@
+accelerate
 einops
+iopath
 torch
 torchvision
+torchinfo
+torch_fidelity
 numpy
 matplotlib
+termcolor
 tqdm
 tensorboard
+omegaconf
+scipy
+wandb

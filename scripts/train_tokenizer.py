@@ -1,24 +1,20 @@
 import math
 import os
+import sys
 from pathlib import Path
 
-from accelerate.utils import set_seed
-from accelerate import Accelerator
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import torch
+from accelerate import Accelerator
+from accelerate.utils import set_seed
 from omegaconf import OmegaConf
 
 from utils.logger import setup_logger
-from utils.train_utils import (
-    get_config,
-    create_model_and_loss_module,
-    create_optimizer,
-    create_lr_scheduler,
-    save_checkpoint,
-    create_evaluator,
-    create_dataloader,
-    train_one_epoch
-)
+from utils.train_utils import (create_dataloader, create_evaluator,
+                               create_lr_scheduler,
+                               create_model_and_loss_module, create_optimizer,
+                               get_config, save_checkpoint, train_one_epoch)
 
 
 def main():
@@ -52,7 +48,7 @@ def main():
     logger = setup_logger(
         name="1d-tokenizer",
         log_level="INFO",
-        output_file=f"{output_dir}/log{accelerator.process_index}.txt"
+        output_file=f"{output_dir}/log{accelerator.process_index}.txt",
     )
 
     # We need to initialize the trackers we use, and also store our configuration.
@@ -69,68 +65,96 @@ def main():
         set_seed(config.training.seed, device_specific=True)
 
     model, ema_model, loss_module = create_model_and_loss_module(
-        config, logger, accelerator)
+        config, logger, accelerator
+    )
 
     optimizer, discriminator_optimizer = create_optimizer(
-        config, logger, model, loss_module)
+        config, logger, model, loss_module
+    )
 
     lr_scheduler, discriminator_lr_scheduler = create_lr_scheduler(
-        config, logger, accelerator, optimizer, discriminator_optimizer)
+        config, logger, accelerator, optimizer, discriminator_optimizer
+    )
 
     # create dataloaders for training and evaluation
-    train_dataloader, eval_dataloader = create_dataloader(
-        config, logger, accelerator)
+    train_dataloader, eval_dataloader = create_dataloader(config, logger, accelerator)
 
     # Set up evaluator.
     evaluator = create_evaluator(config, logger, accelerator)
 
     # prepare accelerator for training
-    model, loss_module, optimizer, discriminator_optimizer, lr_scheduler, discriminator_lr_scheduler = accelerator.prepare(
-        model, loss_module, optimizer, discriminator_optimizer, lr_scheduler, discriminator_lr_scheduler
+    (
+        model,
+        loss_module,
+        optimizer,
+        discriminator_optimizer,
+        lr_scheduler,
+        discriminator_lr_scheduler,
+    ) = accelerator.prepare(
+        model,
+        loss_module,
+        optimizer,
+        discriminator_optimizer,
+        lr_scheduler,
+        discriminator_lr_scheduler,
     )
 
     if config.training.use_ema:
         ema_model.to(accelerator.device)  # load EMA model to device
 
-    total_batch_size_without_accum = config.training.per_gpu_batch_size * \
-        accelerator.num_processes
+    total_batch_size_without_accum = (
+        config.training.per_gpu_batch_size * accelerator.num_processes
+    )
     num_batches = math.ceil(
-        config.experiment.max_train_examples / total_batch_size_without_accum)
+        config.experiment.max_train_examples / total_batch_size_without_accum
+    )
     num_update_steps_per_epoch = math.ceil(
-        num_batches / config.training.gradient_accumulation_steps)
+        num_batches / config.training.gradient_accumulation_steps
+    )
     num_train_epochs = math.ceil(
-        config.training.max_train_steps / num_update_steps_per_epoch)
+        config.training.max_train_steps / num_update_steps_per_epoch
+    )
 
     # Start training.
     logger.info("***** Running training *****")
     logger.info(f"  Num training steps = {config.training.max_train_steps}")
-    logger.info(f"  Gradient Accumulation steps = {
-                config.training.gradient_accumulation_steps}")
-    logger.info(f"  Instantaneous batch size per gpu = {
-                config.training.per_gpu_batch_size}")
-    logger.info(f"""  Total train batch size (w. parallel, distributed & accumulation) = {(
+    logger.info(
+        f"  Gradient Accumulation steps = {config.training.gradient_accumulation_steps}"
+    )
+    logger.info(
+        f"  Instantaneous batch size per gpu = {config.training.per_gpu_batch_size}"
+    )
+    logger.info(
+        f"""  Total train batch size (w. parallel, distributed & accumulation) = {(
         config.training.per_gpu_batch_size *
         accelerator.num_processes *
-        config.training.gradient_accumulation_steps)}""")
+        config.training.gradient_accumulation_steps)}"""
+    )
     global_step = 0
     first_epoch = 0
 
     for current_epoch in range(first_epoch, num_train_epochs):
-        accelerator.print(
-            f"Epoch {current_epoch}/{num_train_epochs-1} started.")
+        accelerator.print(f"Epoch {current_epoch}/{num_train_epochs-1} started.")
         global_step = train_one_epoch(
-            config, logger, accelerator,
-            model, ema_model, loss_module,
-            optimizer, discriminator_optimizer,
-            lr_scheduler, discriminator_lr_scheduler,
-            train_dataloader, eval_dataloader,
+            config,
+            logger,
+            accelerator,
+            model,
+            ema_model,
+            loss_module,
+            optimizer,
+            discriminator_optimizer,
+            lr_scheduler,
+            discriminator_lr_scheduler,
+            train_dataloader,
+            eval_dataloader,
             evaluator,
-            global_step)
+            global_step,
+        )
         # Stop training if max steps is reached.
         if global_step >= config.training.max_train_steps:
             accelerator.print(
-                f"Finishing training: Global step is >= Max train steps: {
-                    global_step} >= {config.training.max_train_steps}"
+                f"Finishing training: Global step is >= Max train steps: {global_step} >= {config.training.max_train_steps}"
             )
             break
 

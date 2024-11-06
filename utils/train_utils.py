@@ -1,26 +1,22 @@
 import json
 import os
+import pprint
 import time
-from pathlib import Path
-import pprint
-import pprint
 from collections import defaultdict
+from pathlib import Path
 
 import torch
-from torch.utils.data import Dataset, DataLoader, Subset
 from omegaconf import OmegaConf
 from torch.optim import AdamW
+from torch.utils.data import DataLoader, Dataset, Subset
 from torchinfo import summary
 from torchvision import transforms
 
-from models import ReconstructionLoss, Tokenizer, EMAModel
+from data.gameplay_dataset_reader import GameFrameDataset, PreprocessingConfig
+from evaluator.evaluator import VQGANEvaluator
+from models import EMAModel, ReconstructionLoss, Tokenizer
 from utils.lr_scheduler import get_cosine_schedule_with_warmup
 from utils.viz_utils import make_viz_from_samples
-from evaluator.evaluator import VQGANEvaluator
-from data.gameplay_dataset_reader import (
-    PreprocessingConfig,
-    GameFrameDataset
-)
 
 
 def get_config():
@@ -56,11 +52,7 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def create_model_and_loss_module(
-    config,
-    logger,
-    accelerator
-):
+def create_model_and_loss_module(config, logger, accelerator):
     """
     Create model and loss modules for given config
 
@@ -73,45 +65,52 @@ def create_model_and_loss_module(
     loss = ReconstructionLoss(config)
 
     ema_model = EMAModel(
-        model.parameters(),
-        decay=0.999,
-        model_cls=Tokenizer,
-        config=config
+        model.parameters(), decay=0.999, model_cls=Tokenizer, config=config
     )
     # Create custom saving and loading hooks so that `accelerator.save_state(...)` serializes in a nice format.
 
     def load_model_hook(models, input_dir):
-        load_model = EMAModel.from_pretrained(os.path.join(input_dir, "ema_model"),
-                                              model_cls=Tokenizer, config=config)
+        load_model = EMAModel.from_pretrained(
+            os.path.join(input_dir, "ema_model"), model_cls=Tokenizer, config=config
+        )
         ema_model.load_state_dict(load_model.state_dict())
         ema_model.to(accelerator.device)
         del load_model
 
     def save_model_hook(models, weights, output_dir):
         if accelerator.is_main_process:
-            ema_model.save_pretrained(
-                os.path.join(output_dir, "ema_model"))
+            ema_model.save_pretrained(os.path.join(output_dir, "ema_model"))
 
     accelerator.register_load_state_pre_hook(load_model_hook)
     accelerator.register_save_state_pre_hook(save_model_hook)
 
     # Print Model for sanity check.
     if accelerator.is_main_process:
-        input_size = (1, 3, config.dataset.preprocessing.crop_size,
-                      config.dataset.preprocessing.crop_size)
-        model_summary_str = summary(model, input_size=input_size, depth=5,
-                                    col_names=("input_size", "output_size", "num_params", "params_percent", "kernel_size", "mult_adds"))
+        input_size = (
+            1,
+            3,
+            config.dataset.preprocessing.crop_size,
+            config.dataset.preprocessing.crop_size,
+        )
+        model_summary_str = summary(
+            model,
+            input_size=input_size,
+            depth=5,
+            col_names=(
+                "input_size",
+                "output_size",
+                "num_params",
+                "params_percent",
+                "kernel_size",
+                "mult_adds",
+            ),
+        )
         logger.info(model_summary_str)
 
     return model, ema_model, loss
 
 
-def create_optimizer(
-    config,
-    logger,
-    model,
-    loss_module
-):
+def create_optimizer(config, logger, model, loss_module):
     """
     Create optimizers for training
 
@@ -120,53 +119,69 @@ def create_optimizer(
     :param model class: model module
     :param loss_module class: loss module
     """
-    logger.info("creating oprimizers")
+    logger.info("creating optimizers")
     optim_config = config.optimizer.params  # config variables for optimizer
     lr = optim_config.learning_rate
 
     optim_cls = AdamW  # use Adam optimizer
 
     # Exclude terms we may not want to apply weight decay.
-    exclude = (lambda n, p: p.ndim < 2 or "ln" in n or "bias" in n or 'latent_tokens' in n
-               or 'mask_token' in n or 'embedding' in n or 'norm' in n or 'gamma' in n)
+    exclude = (
+        lambda n, p: p.ndim < 2
+        or "ln" in n
+        or "bias" in n
+        or "latent_tokens" in n
+        or "mask_token" in n
+        or "embedding" in n
+        or "norm" in n
+        or "gamma" in n
+    )
 
-    def include(n, p): return not exclude(n, p)
+    def include(n, p):
+        return not exclude(n, p)
+
     named_parameters = list(model.named_parameters())
     gain_or_bias_params = [
-        p for n, p in named_parameters if exclude(n, p) and p.requires_grad]
-    rest_params = [p for n, p in named_parameters if include(
-        n, p) and p.requires_grad]
+        p for n, p in named_parameters if exclude(n, p) and p.requires_grad
+    ]
+    rest_params = [p for n, p in named_parameters if include(n, p) and p.requires_grad]
     optimizer = optim_cls(
         [
-            {"params": gain_or_bias_params, "weight_decay": 0.},
+            {"params": gain_or_bias_params, "weight_decay": 0.0},
             {"params": rest_params, "weight_decay": optim_config.weight_decay},
         ],
         lr=lr,
-        betas=(optim_config.beta1, optim_config.beta2)
+        betas=(optim_config.beta1, optim_config.beta2),
     )
 
     # create discriminator optimizer
     discriminator_lr = optim_config.discriminator_learning_rate
     discriminator_params = list(loss_module.named_parameters())
     discriminator_gain_or_bias_params = [
-        p for n, p in discriminator_params if exclude(n, p) and p.requires_grad]
+        p for n, p in discriminator_params if exclude(n, p) and p.requires_grad
+    ]
     discriminator_rest_params = [
-        p for n, p in discriminator_params if include(n, p) and p.requires_grad]
+        p for n, p in discriminator_params if include(n, p) and p.requires_grad
+    ]
 
     discriminator_optimizer = optim_cls(
         [
-            {"params": discriminator_gain_or_bias_params, "weight_decay": 0.},
-            {"params": discriminator_rest_params,
-             "weight_decay": optim_config.weight_decay},
+            {"params": discriminator_gain_or_bias_params, "weight_decay": 0.0},
+            {
+                "params": discriminator_rest_params,
+                "weight_decay": optim_config.weight_decay,
+            },
         ],
         lr=discriminator_lr,
-        betas=(optim_config.beta1, optim_config.beta2)
+        betas=(optim_config.beta1, optim_config.beta2),
     )
 
     return optimizer, discriminator_optimizer
 
 
-def create_lr_scheduler(config, logger, accelerator, optimizer, discriminator_optimizer=None):
+def create_lr_scheduler(
+    config, logger, accelerator, optimizer, discriminator_optimizer=None
+):
     """
     Create lr scheduler for training
 
@@ -182,19 +197,23 @@ def create_lr_scheduler(config, logger, accelerator, optimizer, discriminator_op
     lr_scheduler = get_cosine_schedule_with_warmup(
         optimizer=optimizer,
         num_training_steps=config.training.max_train_steps * accelerator.num_processes,
-        num_warmup_steps=config.lr_scheduler.params.warmup_steps * accelerator.num_processes,
+        num_warmup_steps=config.lr_scheduler.params.warmup_steps
+        * accelerator.num_processes,
         base_lr=config.lr_scheduler.params.learning_rate,
         end_lr=config.lr_scheduler.params.end_lr,
     )
 
     # Create discriminator scheduler if needed
     if discriminator_optimizer is not None:
-        discriminator_steps = (config.training.max_train_steps * accelerator.num_processes -
-                               config.losses.discriminator_start)
+        discriminator_steps = (
+            config.training.max_train_steps * accelerator.num_processes
+            - config.losses.discriminator_start
+        )
         discriminator_lr_scheduler = get_cosine_schedule_with_warmup(
             optimizer=discriminator_optimizer,
             num_training_steps=discriminator_steps,
-            num_warmup_steps=config.lr_scheduler.params.warmup_steps * accelerator.num_processes,
+            num_warmup_steps=config.lr_scheduler.params.warmup_steps
+            * accelerator.num_processes,
             base_lr=config.lr_scheduler.params.learning_rate,
             end_lr=config.lr_scheduler.params.end_lr,
         )
@@ -213,7 +232,7 @@ def create_evaluator(config, logger, accelerator):
         enable_inception_score=True,
         enable_codebook_usage_measure=True,
         enable_codebook_entropy_measure=True,
-        num_codebook_entries=config.model.vq_model.codebook_size
+        num_codebook_entries=config.model.vq_model.codebook_size,
     )
     return evaluator
 
@@ -231,8 +250,7 @@ def create_transforms(preproc_config: PreprocessingConfig, is_training: bool):
     # Resize
     if preproc_config.resize_shorter_edge > 0:
         transform_list.append(
-            transforms.Resize(
-                preproc_config.resize_shorter_edge, antialias=True)
+            transforms.Resize(preproc_config.resize_shorter_edge, antialias=True)
         )
 
     # Crop
@@ -246,11 +264,12 @@ def create_transforms(preproc_config: PreprocessingConfig, is_training: bool):
         transform_list.append(transforms.RandomHorizontalFlip())
 
     # Convert to tensor and normalize
-    transform_list.extend([
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                             std=[0.229, 0.224, 0.225])
-    ])
+    transform_list.extend(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ]
+    )
 
     return transforms.Compose(transform_list)
 
@@ -274,36 +293,36 @@ def create_dataloader(config, logger, accelerator):
         config.training.per_gpu_batch_size * accelerator.num_processes
     )
     total_batch_size = (
-        config.training.per_gpu_batch_size *
-        accelerator.num_processes *
-        config.training.gradient_accumulation_steps
+        config.training.per_gpu_batch_size
+        * accelerator.num_processes
+        * config.training.gradient_accumulation_steps
     )
 
     # Create transforms
-    train_transform = create_transforms(
-        config.dataset.preprocessing, is_training=True)
-    eval_transform = create_transforms(
-        config.dataset.preprocessing, is_training=False)
+    train_transform = create_transforms(config.dataset.preprocessing, is_training=True)
+    eval_transform = create_transforms(config.dataset.preprocessing, is_training=False)
 
     # Create datasets
     train_dataset = GameFrameDataset(
         shard_dir=config.dataset.params.train_shards_path_or_url,
         transform=train_transform,
-        preload_shards=False  # Let's not preload by default for large datasets
+        preload_shards=False,  # Let's not preload by default for large datasets
     )
 
     eval_dataset = GameFrameDataset(
         shard_dir=config.dataset.params.eval_shards_path_or_url,
         transform=eval_transform,
-        preload_shards=False
+        preload_shards=False,
     )
 
     # Limit training examples if specified
-    if hasattr(config.experiment, 'max_train_examples') and \
-       config.experiment.max_train_examples > 0:
+    if (
+        hasattr(config.experiment, "max_train_examples")
+        and config.experiment.max_train_examples > 0
+    ):
         train_dataset = Subset(
             train_dataset,
-            range(min(len(train_dataset), config.experiment.max_train_examples))
+            range(min(len(train_dataset), config.experiment.max_train_examples)),
         )
 
     # Create dataloaders
@@ -313,7 +332,7 @@ def create_dataloader(config, logger, accelerator):
         shuffle=True,
         num_workers=config.dataset.params.num_workers_per_gpu,
         pin_memory=True,
-        drop_last=True  # Drop last incomplete batch for training
+        drop_last=True,  # Drop last incomplete batch for training
     )
 
     eval_dataloader = DataLoader(
@@ -321,7 +340,7 @@ def create_dataloader(config, logger, accelerator):
         batch_size=config.training.per_gpu_batch_size,
         shuffle=False,
         num_workers=config.dataset.params.num_workers_per_gpu,
-        pin_memory=True
+        pin_memory=True,
     )
 
     # Prepare dataloaders with accelerator
@@ -332,8 +351,7 @@ def create_dataloader(config, logger, accelerator):
     logger.info(f"Created train dataloader with {len(train_dataset)} samples")
     logger.info(f"Created eval dataloader with {len(eval_dataset)} samples")
     logger.info(f"Per GPU batch size: {config.training.per_gpu_batch_size}")
-    logger.info(f"Total batch size (with parallel & accumulation): {
-                total_batch_size}")
+    logger.info(f"Total batch size (with parallel & accumulation): {total_batch_size}")
 
     return train_dataloader, eval_dataloader
 
@@ -388,7 +406,9 @@ def train_one_epoch(
         model.train()
         if "image" in batch:
             images = batch["image"].to(
-                accelerator.device, memory_format=torch.contiguous_format, non_blocking=True
+                accelerator.device,
+                memory_format=torch.contiguous_format,
+                non_blocking=True,
             )
         else:
             raise ValueError(f"Not found valid keys: {batch.keys()}")
@@ -400,11 +420,7 @@ def train_one_epoch(
         with accelerator.accumulate([model, loss_module]):
             recon_images, results = model(images)
             autoencoder_loss, loss_dict = loss_module(
-                images,
-                recon_images,
-                results,
-                global_step,
-                mode="generator"
+                images, recon_images, results, global_step, mode="generator"
             )
             # Gather the losses across all processes for logging.
             autoencoder_logs = {}
@@ -415,14 +431,14 @@ def train_one_epoch(
                     else:
                         autoencoder_logs["train/" + k] = v
                 else:
-                    autoencoder_logs["train/" +
-                                     k] = accelerator.gather(v).mean().item()
+                    autoencoder_logs["train/" + k] = accelerator.gather(v).mean().item()
 
             accelerator.backward(autoencoder_loss)
 
             if config.training.max_grad_norm is not None and accelerator.sync_gradients:
                 accelerator.clip_grad_norm_(
-                    model.parameters(), config.training.max_grad_norm)
+                    model.parameters(), config.training.max_grad_norm
+                )
 
             optimizer.step()
             lr_scheduler.step()
@@ -439,7 +455,9 @@ def train_one_epoch(
 
             # Train discriminator.
             discriminator_logs = defaultdict(float)
-            if config.model.vq_model.finetune_decoder and accelerator.unwrap_model(loss_module).should_discriminator_be_trained(global_step):
+            if config.model.vq_model.finetune_decoder and accelerator.unwrap_model(
+                loss_module
+            ).should_discriminator_be_trained(global_step):
                 discriminator_logs = defaultdict(float)
                 discriminator_loss, loss_dict_discriminator = loss_module(
                     images,
@@ -457,14 +475,19 @@ def train_one_epoch(
                         else:
                             discriminator_logs["train/" + k] = v
                     else:
-                        discriminator_logs["train/" +
-                                           k] = accelerator.gather(v).mean().item()
+                        discriminator_logs["train/" + k] = (
+                            accelerator.gather(v).mean().item()
+                        )
 
                 accelerator.backward(discriminator_loss)
 
-                if config.training.max_grad_norm is not None and accelerator.sync_gradients:
+                if (
+                    config.training.max_grad_norm is not None
+                    and accelerator.sync_gradients
+                ):
                     accelerator.clip_grad_norm_(
-                        loss_module.parameters(), config.training.max_grad_norm)
+                        loss_module.parameters(), config.training.max_grad_norm
+                    )
 
                 discriminator_optimizer.step()
                 discriminator_lr_scheduler.step()
@@ -487,20 +510,19 @@ def train_one_epoch(
 
             if (global_step + 1) % config.experiment.log_every == 0:
                 samples_per_second_per_gpu = (
-                    config.training.gradient_accumulation_steps *
-                    config.training.per_gpu_batch_size / batch_time_meter.val
+                    config.training.gradient_accumulation_steps
+                    * config.training.per_gpu_batch_size
+                    / batch_time_meter.val
                 )
 
                 lr = lr_scheduler.get_last_lr()[0]
                 logger.info(
-                    f"Data (t): {data_time_meter.val:0.4f}, {
-                        samples_per_second_per_gpu:0.2f}/s/gpu "
+                    f"Data (t): {data_time_meter.val:0.4f}, {samples_per_second_per_gpu:0.2f}/s/gpu "
                     f"Batch (t): {batch_time_meter.val:0.4f} "
                     f"LR: {lr:0.6f} "
                     f"Step: {global_step + 1} "
                     f"Total Loss: {autoencoder_logs['train/total_loss']:0.4f} "
-                    f"Recon Loss: {
-                        autoencoder_logs['train/reconstruction_loss']:0.4f} "
+                    f"Recon Loss: {autoencoder_logs['train/reconstruction_loss']:0.4f} "
                 )
                 logs = {
                     "lr": lr,
@@ -520,12 +542,20 @@ def train_one_epoch(
             # Save model checkpoint.
             if (global_step + 1) % config.experiment.save_every == 0:
                 save_path = save_checkpoint(
-                    model, config.experiment.output_dir, accelerator, global_step + 1, logger=logger)
+                    model,
+                    config.experiment.output_dir,
+                    accelerator,
+                    global_step + 1,
+                    logger=logger,
+                )
                 # Wait for everyone to save their checkpoint.
                 accelerator.wait_for_everyone()
 
             # Generate images.
-            if (global_step + 1) % config.experiment.generate_every == 0 and accelerator.is_main_process:
+            if (
+                (global_step + 1) % config.experiment.generate_every == 0
+                and accelerator.is_main_process
+            ):
                 # Store the model parameters temporarily and load the EMA parameters to perform inference.
                 if config.training.get("use_ema", False):
                     ema_model.store(model.parameters())
@@ -533,8 +563,8 @@ def train_one_epoch(
 
                 reconstruct_images(
                     model,
-                    images[:config.training.num_generated_images],
-                    fnames[:config.training.num_generated_images],
+                    images[: config.training.num_generated_images],
+                    fnames[: config.training.num_generated_images],
                     accelerator,
                     global_step + 1,
                     config.experiment.output_dir,
@@ -547,7 +577,10 @@ def train_one_epoch(
                     ema_model.restore(model.parameters())
 
             # Evaluate reconstruction.
-            if eval_dataloader is not None and (global_step + 1) % config.experiment.eval_every == 0:
+            if (
+                eval_dataloader is not None
+                and (global_step + 1) % config.experiment.eval_every == 0
+            ):
                 logger.info(f"Computing metrics on the validation set.")
                 if config.training.get("use_ema", False):
                     ema_model.store(model.parameters())
@@ -559,14 +592,10 @@ def train_one_epoch(
                         accelerator,
                         evaluator,
                     )
-                    logger.info(
-                        f"EMA EVALUATION "
-                        f"Step: {global_step + 1} "
-                    )
+                    logger.info(f"EMA EVALUATION " f"Step: {global_step + 1} ")
                     logger.info(pprint.pformat(eval_scores))
                     if accelerator.is_main_process:
-                        eval_log = {f'ema_eval/'+k: v for k,
-                                    v in eval_scores.items()}
+                        eval_log = {f"ema_eval/" + k: v for k, v in eval_scores.items()}
                         accelerator.log(eval_log, step=global_step + 1)
                     if config.training.get("use_ema", False):
                         # Switch back to the original model parameters for training.
@@ -580,14 +609,10 @@ def train_one_epoch(
                         evaluator,
                     )
 
-                    logger.info(
-                        f"Non-EMA EVALUATION "
-                        f"Step: {global_step + 1} "
-                    )
+                    logger.info(f"Non-EMA EVALUATION " f"Step: {global_step + 1} ")
                     logger.info(pprint.pformat(eval_scores))
                     if accelerator.is_main_process:
-                        eval_log = {f'eval/'+k: v for k,
-                                    v in eval_scores.items()}
+                        eval_log = {f"eval/" + k: v for k, v in eval_scores.items()}
                         accelerator.log(eval_log, step=global_step + 1)
 
                 accelerator.wait_for_everyone()
@@ -596,8 +621,7 @@ def train_one_epoch(
 
             if global_step >= config.training.max_train_steps:
                 accelerator.print(
-                    f"Finishing training: Global step is >= Max train steps: {
-                        global_step} >= {config.training.max_train_steps}"
+                    f"Finishing training: Global step is >= Max train steps: {global_step} >= {config.training.max_train_steps}"
                 )
                 break
 
@@ -623,12 +647,14 @@ def eval_reconstruction(
         reconstructed_images, model_dict = local_model(images)
         reconstructed_images = torch.clamp(reconstructed_images, 0.0, 1.0)
         # Quantize to uint8
-        reconstructed_images = torch.round(
-            reconstructed_images * 255.0) / 255.0
+        reconstructed_images = torch.round(reconstructed_images * 255.0) / 255.0
         original_images = torch.clamp(original_images, 0.0, 1.0)
         # For VQ model.
-        evaluator.update(original_images, reconstructed_images.squeeze(
-            2), model_dict["min_encoding_indices"])
+        evaluator.update(
+            original_images,
+            reconstructed_images.squeeze(2),
+            model_dict["min_encoding_indices"],
+        )
     model.train()
     return evaluator.result()
 
@@ -653,19 +679,20 @@ def reconstruct_images(
     elif accelerator.mixed_precision == "bf16":
         dtype = torch.bfloat16
 
-    with torch.autocast("cuda", dtype=dtype, enabled=accelerator.mixed_precision != "no"):
-        enc_tokens, encoder_dict = accelerator.unwrap_model(
-            model).encode(original_images)
+    with torch.autocast(
+        "cuda", dtype=dtype, enabled=accelerator.mixed_precision != "no"
+    ):
+        enc_tokens, encoder_dict = accelerator.unwrap_model(model).encode(
+            original_images
+        )
     reconstructed_images = accelerator.unwrap_model(model).decode(enc_tokens)
     images_for_saving, images_for_logging = make_viz_from_samples(
-        original_images,
-        reconstructed_images
+        original_images, reconstructed_images
     )
     # Log images.
     if config.training.enable_wandb:
         accelerator.get_tracker("wandb").log_images(
-            {f"Train Reconstruction": images_for_saving},
-            step=global_step
+            {f"Train Reconstruction": images_for_saving}, step=global_step
         )
     else:
         accelerator.get_tracker("tensorboard").log_images(
@@ -694,8 +721,9 @@ def save_checkpoint(model, output_dir, accelerator, global_step, logger) -> Path
             save_function=accelerator.save,
             state_dict=state_dict,
         )
-        json.dump({"global_step": global_step},
-                  (save_path / "metadata.json").open("w+"))
+        json.dump(
+            {"global_step": global_step}, (save_path / "metadata.json").open("w+")
+        )
         logger.info(f"Saved state to {save_path}")
 
     accelerator.save_state(save_path)
