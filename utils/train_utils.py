@@ -413,7 +413,6 @@ def train_one_epoch(
         else:
             raise ValueError(f"Not found valid keys: {batch.keys()}")
 
-        fnames = batch["__key__"]  # frame names
         data_time_meter.update(time.time() - end)  # update meter
 
         # forward pass through model
@@ -564,7 +563,6 @@ def train_one_epoch(
                 reconstruct_images(
                     model,
                     images[: config.training.num_generated_images],
-                    fnames[: config.training.num_generated_images],
                     accelerator,
                     global_step + 1,
                     config.experiment.output_dir,
@@ -663,7 +661,6 @@ def eval_reconstruction(
 def reconstruct_images(
     model,
     original_images,
-    fnames,
     accelerator,
     global_step,
     output_dir,
@@ -692,7 +689,7 @@ def reconstruct_images(
     # Log images.
     if config.training.enable_wandb:
         accelerator.get_tracker("wandb").log_images(
-            {f"Train Reconstruction": images_for_saving}, step=global_step
+            {"Train Reconstruction": images_for_saving}, step=global_step
         )
     else:
         accelerator.get_tracker("tensorboard").log_images(
@@ -702,7 +699,7 @@ def reconstruct_images(
     root = Path(output_dir) / "train_images"
     os.makedirs(root, exist_ok=True)
     for i, img in enumerate(images_for_saving):
-        filename = f"{global_step:08}_s-{i:03}-{fnames[i]}.png"
+        filename = f"{global_step:08}_s-{i:03}.png"
         path = os.path.join(root, filename)
         img.save(path)
 

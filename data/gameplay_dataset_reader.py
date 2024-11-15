@@ -105,6 +105,7 @@ class GameFrameDataset(Dataset):
 
         frames = np.load(frame_path)
         actions = np.load(action_path)
+
         return frames, actions
 
     def _get_shard_and_idx(self, idx: int) -> Tuple[int, int]:
@@ -154,7 +155,7 @@ class GameFrameDataset(Dataset):
         action = actions[local_idx]
 
         # Convert frame to PIL Image for transforms
-        frame = Image.fromarray(frame)
+        frame = Image.fromarray((frame * 255).astype(np.uint8))
 
         # Apply transforms if specified
         if self.transform:

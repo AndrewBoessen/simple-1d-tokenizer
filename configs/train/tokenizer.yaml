@@ -12,6 +12,7 @@ experiment:
 
 model:
     vq_model:
+        finetune_decoder: True
         codebook_size: 4096
         token_size: 12
         use_l2_norm: True
@@ -39,7 +40,7 @@ dataset:
     params:
         train_shards_path_or_url: "gameplay_data/train/"
         eval_shards_path_or_url: "gameplay_data/val/"
-        num_workers_per_gpu: 12
+        num_workers_per_gpu: 4
     preprocessing:
         resize_shorter_edge: 256
         crop_size: 256
@@ -65,7 +66,7 @@ lr_scheduler:
 
 training:
     gradient_accumulation_steps: 1
-    per_gpu_batch_size: 32
+    per_gpu_batch_size: 8
     mixed_precision: "fp16"
     enable_tf32: True
     enable_wandb: False
