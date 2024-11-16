@@ -3,8 +3,8 @@ experiment:
     name: "1d_tokenizer_run1"
     output_dir: "1d_tokenizer_run1"
     max_train_examples: 1_000_000
-    save_every: 1_000
-    eval_every: 1_000
+    save_every: 10_000
+    eval_every: 10_000
     generate_every: 5_000
     log_every: 50
     log_grad_norm_every: 1_000
@@ -13,8 +13,8 @@ experiment:
 model:
     vq_model:
         finetune_decoder: True
-        codebook_size: 4096
-        token_size: 12
+        codebook_size: 2048
+        token_size: 128
         use_l2_norm: True
         commitment_cost: 0.25
         # vit arch
@@ -22,10 +22,10 @@ model:
         vit_dec_model_size: "base"
         vit_enc_patch_size: 16
         vit_dec_patch_size: 16
-        num_latent_tokens: 64
+        num_latent_tokens: 128
 
 losses:
-    discriminator_start: 20_000
+    discriminator_start: 10_000
     quantizer_weight: 1.0
     discriminator_factor: 1.0
     discriminator_weight: 0.01
