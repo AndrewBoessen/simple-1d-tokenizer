@@ -76,7 +76,7 @@ class VectorQuantizer(torch.nn.Module):
             quantizer_loss=loss,
             commitment_loss=commitment_loss,
             codebook_loss=codebook_loss,
-            embedding_ids=closest_embedding_ids,
+            min_encoding_indices=closest_embedding_ids.view(z_q.shape[0], z_q.shape[2]),
         )
 
         return z_q, result_dict

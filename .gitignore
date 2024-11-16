@@ -164,3 +164,4 @@ cython_debug/
 # logs
 /wandb
 /1d_tokenizer_run1
+/gameplay_data
