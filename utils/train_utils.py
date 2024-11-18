@@ -5,12 +5,14 @@ import time
 from collections import defaultdict
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import torch
 from omegaconf import OmegaConf
+from torch import nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, Dataset, Subset
 from torchinfo import summary
-from torchvision import transforms
+from torchvision.transforms import v2 as transforms
 
 from data.gameplay_dataset_reader import GameFrameDataset, PreprocessingConfig
 from evaluator.evaluator import VQGANEvaluator
@@ -268,6 +270,7 @@ def create_transforms(preproc_config: PreprocessingConfig, is_training: bool):
         [
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            transforms.GaussianNoise(mean=0.0, sigma=0.1),
         ]
     )
 

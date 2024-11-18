@@ -155,7 +155,7 @@ class GameFrameDataset(Dataset):
         action = actions[local_idx]
 
         # Convert frame to PIL Image for transforms
-        frame = Image.fromarray((frame * 255).astype(np.uint8))
+        frame = Image.fromarray(frame)
 
         # Apply transforms if specified
         if self.transform:

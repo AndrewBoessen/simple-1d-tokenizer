@@ -31,12 +31,12 @@ class Decoder(nn.Module):
         self.token_size = config.model.vq_model.token_size
 
         self.width = {
-            "small": 512,
+            "small": 128,
             "base": 768,
             "large": 1024,
         }[self.model_size]
         self.num_layers = {
-            "small": 8,
+            "small": 1,
             "base": 12,
             "large": 24,
         }[self.model_size]

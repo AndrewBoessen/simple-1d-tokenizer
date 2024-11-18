@@ -2,10 +2,10 @@ experiment:
     project: "1d-tokenizer"
     name: "1d_tokenizer_run1"
     output_dir: "1d_tokenizer_run1"
-    max_train_examples: 1_000_000
+    max_train_examples: 500_000
     save_every: 10_000
     eval_every: 10_000
-    generate_every: 5_000
+    generate_every: 1_000
     log_every: 50
     log_grad_norm_every: 1_000
 
@@ -13,19 +13,19 @@ experiment:
 model:
     vq_model:
         finetune_decoder: True
-        codebook_size: 2048
-        token_size: 128
+        codebook_size: 512
+        token_size: 32
         use_l2_norm: True
         commitment_cost: 0.25
         # vit arch
-        vit_enc_model_size: "base"
-        vit_dec_model_size: "base"
+        vit_enc_model_size: "small"
+        vit_dec_model_size: "small"
         vit_enc_patch_size: 16
         vit_dec_patch_size: 16
         num_latent_tokens: 128
 
 losses:
-    discriminator_start: 10_000
+    discriminator_start: 2_000
     quantizer_weight: 1.0
     discriminator_factor: 1.0
     discriminator_weight: 0.01
@@ -40,7 +40,7 @@ dataset:
     params:
         train_shards_path_or_url: "gameplay_data/train/"
         eval_shards_path_or_url: "gameplay_data/val/"
-        num_workers_per_gpu: 8
+        num_workers_per_gpu: 12
     preprocessing:
         resize_shorter_edge: 256
         crop_size: 256
@@ -51,8 +51,8 @@ dataset:
 optimizer:
     name: adamw 
     params:
-        learning_rate: 2e-4
-        discriminator_learning_rate: 2e-4
+        learning_rate: 1e-4
+        discriminator_learning_rate: 1e-4
         beta1: 0.9
         beta2: 0.999
         weight_decay: 1e-4
@@ -72,6 +72,6 @@ training:
     enable_wandb: False
     use_ema: True
     seed: 42
-    max_train_steps: 500_000
+    max_train_steps: 1_000_000
     num_generated_images: 2
     max_grad_norm: 1.0
