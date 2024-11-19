@@ -1,6 +1,6 @@
 # models/__init__.py
 from .base_model import BaseModel
-from .blocks import Attention, ResidualAttention
+from .blocks import Attention, ResidualAttention, Residual, ResidualStack
 from .decoder import Decoder
 from .ema import EMAModel
 from .encoder import Encoder
@@ -16,6 +16,8 @@ __all__ = [
     "Decoder",
     "VectorQuantizer",
     "ResidualAttention",
+    "ResidualStack",
+    "Residual",
     "Attention",
     "EMAModel",
     "ReconstructionLoss",
