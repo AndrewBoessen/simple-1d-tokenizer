@@ -5,7 +5,90 @@ Transformer Attention Blocks
 from collections import OrderedDict
 import torch
 from torch import nn
+import torch.nn.functional as F
 import einops
+
+
+class Residual(nn.Module):
+    """
+    Residual Convolutional Layer
+    """
+
+    def __init__(self, in_channels, num_hiddens, num_residual_hiddens):
+        """
+        initialize residual CNN layer
+
+        :param in_channels number: Number of input channels
+        :param num_hiddens number: Number of hidden channels
+        :param num_residual_hiddens number: Number of residual hiddens
+        """
+        super(Residual, self).__init__()
+        self._block = nn.Sequential(
+            nn.ReLU(True),
+            # C: 3 -> residual hidden
+            nn.Conv2d(
+                in_channels=in_channels,
+                out_channels=num_residual_hiddens,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=False,
+            ),
+            nn.ReLU(True),
+            # C: resiual hidden -> out_hidden
+            nn.Conv2d(
+                in_channels=num_residual_hiddens,
+                out_channels=num_hiddens,
+                kernel_size=1,
+                stride=1,
+                bias=False,
+            ),
+        )
+
+    def forward(self, x):
+        """
+        Residual layer
+
+        :param x numpy.ndarray: Input image
+        """
+        return x + self._block(x)  # residual output
+
+
+class ResidualStack(nn.Module):
+    """
+    Residual Convolution Stack
+    """
+
+    def __init__(
+        self, in_channels, num_hiddens, num_residual_layers, num_residual_hiddens
+    ):
+        """
+        initialize residual stack
+
+        :param in_channels number: Number of input channels
+        :param num_hiddens number: Number of hidden channels
+        :param num_residual_layers number: Number of residual layers in stack
+        :param num_residual_hiddens number: Number of hidden residual channels
+        """
+        super(ResidualStack, self).__init__()
+        self._num_residual_layers = num_residual_layers
+        self._layers = nn.ModuleList(
+            [
+                Residual(in_channels, num_hiddens, num_residual_hiddens)
+                for _ in range(self._num_residual_layers)
+            ]
+        )
+
+    def forward(self, x):
+        """
+        Apply residual stack
+
+        :param x numpy.ndarray: Input image
+        """
+        # Apply all residual layers in stack
+        for i in range(self._num_residual_layers):
+            x = self._layers[i](x)
+        return F.relu(x)
 
 
 class ResidualAttention(nn.Module):

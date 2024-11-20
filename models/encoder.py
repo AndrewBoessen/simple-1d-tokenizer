@@ -16,7 +16,7 @@ class ExtractLatentTokens(nn.Module):
         self.grid_size = grid_size
 
     def forward(self, x):
-        return x[:, self.grid_size**2 :]
+        return x[:, self.grid_size**2:]
 
 
 class Encoder(nn.Module):
@@ -40,12 +40,12 @@ class Encoder(nn.Module):
         self.token_size = config.model.vq_model.token_size
 
         self.width = {
-            "small": 128,
+            "small": 512,
             "base": 768,
             "large": 1024,
         }[self.model_size]
         self.num_layers = {
-            "small": 1,
+            "small": 4,
             "base": 12,
             "large": 24,
         }[self.model_size]
@@ -84,7 +84,8 @@ class Encoder(nn.Module):
         # post trasnformer layer norm
         self.ln_post = nn.LayerNorm(self.width)
         # project model dim to token dim
-        self.conv_out = nn.Conv2d(self.width, self.token_size, kernel_size=1, bias=True)
+        self.conv_out = nn.Conv2d(
+            self.width, self.token_size, kernel_size=1, bias=True)
 
         # encoder model
         self.model = nn.Sequential(

@@ -100,7 +100,46 @@ class PerceptualLoss(nn.Module):
         return loss
 
 
-class ReconstructionLoss(nn.Module):
+class ReconstructionLoss_Stage1(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        loss_config = config.losses
+        self.quantizer_weight = loss_config.quantizer_weight
+        self.target_codebook_size = 128  # size of proxy codes codebook
+
+    def forward(
+        self,
+        target_codes: torch.Tensor,
+        reconstructions: torch.Tensor,
+        quantizer_loss: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Mapping[Text, torch.Tensor]]:
+        reconstructions = reconstructions.contiguous()
+        reconstructions = reconstructions.contiguous()
+        loss_fct = nn.CrossEntropyLoss(reduction="mean")
+        batch_size = reconstructions.shape[0]
+        reconstruction_loss = loss_fct(
+            reconstructions.view(batch_size, self.target_codebook_size, -1),
+            target_codes.view(batch_size, -1),
+        )
+        total_loss = (
+            reconstruction_loss
+            + self.quantizer_weight * quantizer_loss["quantizer_loss"]
+        )
+
+        loss_dict = dict(
+            total_loss=total_loss.clone().detach(),
+            reconstruction_loss=reconstruction_loss.detach(),
+            quantizer_loss=(
+                self.quantizer_weight * quantizer_loss["quantizer_loss"]
+            ).detach(),
+            commitment_loss=quantizer_loss["commitment_loss"].detach(),
+            codebook_loss=quantizer_loss["codebook_loss"].detach(),
+        )
+
+        return total_loss, loss_dict
+
+
+class ReconstructionLoss_Stage2(nn.Module):
     """
     Loss for reconstruction network
     """

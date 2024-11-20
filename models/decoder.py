@@ -16,7 +16,7 @@ class RemoveLatentTokens(nn.Module):
         self.grid_size = grid_size
 
     def forward(self, x):
-        return x[:, 0 : self.grid_size**2]
+        return x[:, 0: self.grid_size**2]
 
 
 class Decoder(nn.Module):
@@ -29,14 +29,16 @@ class Decoder(nn.Module):
         self.model_size = config.model.vq_model.vit_dec_model_size
         self.num_latent_tokens = config.model.vq_model.num_latent_tokens
         self.token_size = config.model.vq_model.token_size
+        self.predict_pixels = config.model.vq_model.get(
+            "predict_pixels", False)
 
         self.width = {
-            "small": 128,
+            "small": 512,
             "base": 768,
             "large": 1024,
         }[self.model_size]
         self.num_layers = {
-            "small": 1,
+            "small": 4,
             "base": 12,
             "large": 24,
         }[self.model_size]
@@ -65,16 +67,25 @@ class Decoder(nn.Module):
             )
         self.ln_post = nn.LayerNorm(self.width)  # post attention layer norm
         # FFN to convert mask tokens to image patches
-        self.ffn = nn.Sequential(
-            nn.Conv2d(self.width, 3 * self.patch_size**2, 1, padding=0, bias=True),
-            Rearrange(
-                "B (P1 P2 C) H W -> B C (H P1) (W P2)",
-                P1=self.patch_size,
-                P2=self.patch_size,
-            ),
-        )
-        # conv layer on pixel output
-        self.conv_out = nn.Conv2d(3, 3, 3, padding=1, bias=True)
+        if self.predict_pixels:
+            self.ffn = nn.Sequential(
+                nn.Conv2d(self.width, 3 * self.patch_size **
+                          2, 1, padding=0, bias=True),
+                Rearrange(
+                    "B (P1 P2 C) H W -> B C (H P1) (W P2)",
+                    P1=self.patch_size,
+                    P2=self.patch_size,
+                ),
+            )
+            # conv layer on pixel output
+            self.conv_out = nn.Conv2d(3, 3, 3, padding=1, bias=True)
+        else:
+            self.ffn = nn.Sequential(
+                nn.Conv2d(self.width, 2 * self.width, 1, padding=0, bias=True),
+                nn.Tanh(),
+                nn.Conv2d(2 * self.width, 64, 1, padding=0, bias=True)
+            )
+            self.conv_out = nn.Identity()
 
         self.model = nn.Sequential(
             self.ln_pre,
@@ -83,7 +94,8 @@ class Decoder(nn.Module):
             Rearrange("L B C -> B L C"),
             RemoveLatentTokens(grid_size=self.grid_size),
             self.ln_post,
-            Rearrange("B (H W) C -> B C H W", H=self.grid_size, W=self.grid_size),
+            Rearrange("B (H W) C -> B C H W",
+                      H=self.grid_size, W=self.grid_size),
             self.ffn,
             self.conv_out
         )
@@ -95,9 +107,11 @@ class Decoder(nn.Module):
         x = einops.rearrange(z_q, "B C L -> B L C")
         x = self.decoder_embed(x)  # embed tokens in model dim
 
-        mask_tokens = self.mask_token.repeat(B, self.grid_size**2, 1).to(x.dtype)
+        mask_tokens = self.mask_token.repeat(
+            B, self.grid_size**2, 1).to(x.dtype)
         # Add positional embeddings
-        mask_tokens = mask_tokens + self.positional_embedding.to(mask_tokens.dtype)
+        mask_tokens = mask_tokens + \
+            self.positional_embedding.to(mask_tokens.dtype)
         x = x + self.latent_token_positional_embedding[:L]
         x = torch.cat([mask_tokens, x], dim=1)
 
