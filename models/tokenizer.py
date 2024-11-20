@@ -7,12 +7,12 @@ from einops import rearrange
 from torch import nn
 
 from .base_model import BaseModel
+from .cnn_vqvae import Decoder as PixelDecoder
+from .cnn_vqvae import Encoder as PixelEncoder
+from .cnn_vqvae import VectorQuantizeEMA
 from .decoder import Decoder
 from .encoder import Encoder
 from .quantizer import VectorQuantizer
-from .cnn_vqvae import VectorQuantizeEMA
-from .cnn_vqvae import Encoder as PixelEncoder
-from .cnn_vqvae import Decoder as PixelDecoder
 
 
 class VQVAE(nn.Module):
@@ -21,16 +21,7 @@ class VQVAE(nn.Module):
     Contains: Encoder, Quantizer, Decoder
     """
 
-    def __init__(
-        self,
-        num_hiddens,
-        num_residual_layers,
-        num_residual_hiddens,
-        num_embeddings,
-        embedding_dim,
-        commitment_cost,
-        decay,
-    ):
+    def __init__(self, pretrained_weight):
         """
         Initialize VQ-VAE encoder decoder network
 
@@ -42,7 +33,19 @@ class VQVAE(nn.Module):
         :param commitment_cost number: Weight for commitment const in loss
         :param decay number: Decay parameter in EMA
         """
+        num_hiddens = 128
+        num_residual_layers = 2
+        num_residual_hiddens = 32
+        num_embeddings = 128
+        embedding_dim = 8
+        commitment_cost = 0.25
+        decay = 0.99
+
         super(VQVAE, self).__init__()
+
+        self.load_state_dict(
+            torch.load(pretrained_weight, map_location=torch.device("cpu")), strict=True
+        )
 
         self._encoder = PixelEncoder(
             3, num_hiddens, num_residual_layers, num_residual_hiddens
@@ -57,6 +60,10 @@ class VQVAE(nn.Module):
         self._decoder = PixelDecoder(
             embedding_dim, num_hiddens, num_residual_layers, num_residual_hiddens
         )
+
+        self.eval()
+        for param in self.parameters():
+            param.requires_grad(False)
 
     def set_embeddings(self, new_embeddings):
         """
@@ -116,8 +123,7 @@ class Tokenizer(BaseModel):
         super().__init__()
         self.config = config
 
-        self.finetune_decoder = config.model.vq_model.get(
-            "finetune_decoder", True)
+        self.finetune_decoder = config.model.vq_model.get("finetune_decoder", True)
 
         self.encoder = Encoder(config)
         self.decoder = Decoder(config)
@@ -145,9 +151,18 @@ class Tokenizer(BaseModel):
             self.quantizer.requires_grad(False)
 
             self.pixel_quantizer = VectorQuantizeEMA(
-                n_embeddings=64, embedding_dim=8, commitment_cost=0.25, decay=0.99, epsilon=0.01)
+                n_embeddings=64,
+                embedding_dim=8,
+                commitment_cost=0.25,
+                decay=0.99,
+                epsilon=0.01,
+            )
             self.pixel_decoder = PixelDecoder(
-                in_channels=3, num_hiddens=128, num_residual_layers=2, num_residual_hiddens=32)
+                in_channels=3,
+                num_hiddens=128,
+                num_residual_layers=2,
+                num_residual_hiddens=32,
+            )
 
     def _init_weights(self, module):
         """Initialize the weights.
@@ -182,8 +197,7 @@ class Tokenizer(BaseModel):
             with torch.no_grad():
                 self.encoder.eval()
                 self.quantizer.eval()
-                z = self.encoder(
-                    pixel_values=x, latent_tokens=self.latent_tokens)
+                z = self.encoder(pixel_values=x, latent_tokens=self.latent_tokens)
                 z_q, result_dict = self.quantizer(z)
                 result_dict["quantizer_loss"] *= 0
                 result_dict["commitment_loss"] *= 0
@@ -203,7 +217,10 @@ class Tokenizer(BaseModel):
         decoded = self.decoder(z_q)
         if self.finetune_decoder:
             quantized_states = torch.einsum(
-                'N C H W, C D -> N D H W', decoded.softmax(1), self.pixel_quantizer._embedding.weight)
+                "N C H W, C D -> N D H W",
+                decoded.softmax(1),
+                self.pixel_quantizer._embedding.weight,
+            )
             decoded = self.pixel_decoder(quantized_states)
         return decoded
 
@@ -215,8 +232,7 @@ class Tokenizer(BaseModel):
         """
         tokens = tokens.squeeze(1)
         B, L = tokens.shape
-        z_q = self.quantizer.get_codebook_entry(
-            tokens.reshape(-1)).reshape(B, L, -1)
+        z_q = self.quantizer.get_codebook_entry(tokens.reshape(-1)).reshape(B, L, -1)
         z_q = rearrange(z_q, "B L C -> B C L")
         return self.decoder(z_q)
 

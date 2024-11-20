@@ -12,7 +12,7 @@ experiment:
 
 model:
     vq_model:
-        finetune_decoder: True
+        finetune_decoder: False
         codebook_size: 512
         token_size: 32
         use_l2_norm: True
@@ -23,6 +23,7 @@ model:
         vit_enc_patch_size: 16
         vit_dec_patch_size: 16
         num_latent_tokens: 128
+        predict_pixels: False
 
 losses:
     discriminator_start: 2_000
